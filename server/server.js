@@ -41,13 +41,25 @@ const typingUsers = new Map(); // Map<userId, Set<typingToUserId>>
 // Socket.io connection handler
 io.on("connection", (socket) => {
   const userId = socket.handshake.query.userId;
-  console.log("User Connected:", userId, "Socket ID:", socket.id);
 
-  if (userId && userId !== "undefined") {
+  console.log("🔵 User Connected:", userId, "Socket ID:", socket.id);
+
+  if (userId && userId !== "undefined" && userId !== "null") {
+    // Remove old socket if exists
+    const oldSocketId = userSocketMap[userId];
+    if (oldSocketId && oldSocketId !== socket.id) {
+      console.log("Removing old socket for user:", userId);
+      io.sockets.sockets.get(oldSocketId)?.disconnect(true);
+    }
+
     userSocketMap[userId] = socket.id;
 
     // Emit updated online users immediately
-    io.emit("getOnlineUsers", Object.keys(userSocketMap));
+    const onlineUserIds = Object.keys(userSocketMap);
+    console.log("📡 Broadcasting online users:", onlineUserIds);
+    io.emit("getOnlineUsers", onlineUserIds);
+  } else {
+    console.warn("⚠️ Invalid userId in connection:", userId);
   }
 
   // Handle typing events with debounce
@@ -99,16 +111,24 @@ io.on("connection", (socket) => {
 
   // Handle disconnection with proper cleanup
   socket.on("disconnect", (reason) => {
-    console.log("User Disconnected:", userId, "Reason:", reason);
+    console.log("🔴 User Disconnected:", userId, "Reason:", reason);
 
-    if (userId && userSocketMap[userId] === socket.id) {
-      delete userSocketMap[userId];
+    if (userId && userId !== "undefined" && userId !== "null") {
+      // Only delete if this socket belongs to this user
+      if (userSocketMap[userId] === socket.id) {
+        delete userSocketMap[userId];
 
-      // Clean up typing state
-      typingUsers.delete(userId);
+        // Clean up typing state
+        typingUsers.delete(userId);
 
-      // Emit updated online users
-      io.emit("getOnlineUsers", Object.keys(userSocketMap));
+        // Emit updated online users
+        const onlineUserIds = Object.keys(userSocketMap);
+        console.log(
+          "📡 Broadcasting online users after disconnect:",
+          onlineUserIds
+        );
+        io.emit("getOnlineUsers", onlineUserIds);
+      }
     }
   });
 
@@ -126,10 +146,6 @@ app.use(
     credentials: true,
   })
 );
-
-// Add compression middleware for better performance
-import compression from "compression";
-app.use(compression());
 
 // Routes setup
 app.use("/api/status", (req, res) => res.send("Server is live"));

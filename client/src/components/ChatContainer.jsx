@@ -196,10 +196,12 @@ const ChatContainer = () => {
 
   // Connection status indicator
   const connectionIndicator = connectionStatus !== "connected" && (
-    <div className="absolute top-0 left-0 right-0 bg-yellow-500/90 text-white text-center py-1 text-xs z-10">
+    <div className="absolute top-0 left-0 right-0 bg-yellow-500/90 text-white text-center py-1 text-xs z-10 animate-slide-down">
       {connectionStatus === "reconnecting"
-        ? "Reconnecting..."
-        : "Connection lost"}
+        ? "🔄 Reconnecting..."
+        : connectionStatus === "error"
+        ? "⚠️ Connection error"
+        : "📡 Connecting..."}
     </div>
   );
 

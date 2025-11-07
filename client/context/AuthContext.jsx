@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState, useCallback } from "react";
+import { createContext, useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import toast from "react-hot-toast";
 import { io } from "socket.io-client";
@@ -13,7 +13,11 @@ export const AuthProvider = ({ children }) => {
   const [authUser, setAuthUser] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [socket, setSocket] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState("connecting");
+  const [connectionStatus, setConnectionStatus] = useState("disconnected");
+
+  // Use ref to prevent reconnection loops
+  const socketRef = useRef(null);
+  const isConnectingRef = useRef(false);
 
   // Check authentication
   const checkAuth = useCallback(async () => {
@@ -21,12 +25,13 @@ export const AuthProvider = ({ children }) => {
       const { data } = await axios.get("/api/auth/check");
       if (data.success) {
         setAuthUser(data.user);
-        connectSocket(data.user);
+        return data.user;
       }
     } catch (error) {
       console.error("Auth check failed:", error);
       localStorage.removeItem("token");
       setToken(null);
+      return null;
     }
   }, []);
 
@@ -36,7 +41,6 @@ export const AuthProvider = ({ children }) => {
       const { data } = await axios.post(`/api/auth/${state}`, credentials);
       if (data.success) {
         setAuthUser(data.userData);
-        connectSocket(data.userData);
         axios.defaults.headers.common["token"] = data.token;
         setToken(data.token);
         localStorage.setItem("token", data.token);
@@ -56,12 +60,15 @@ export const AuthProvider = ({ children }) => {
     setAuthUser(null);
     setOnlineUsers([]);
     axios.defaults.headers.common["token"] = null;
-    toast.success("Logged out successfully");
-    if (socket) {
-      socket.disconnect();
+
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
       setSocket(null);
     }
-  }, [socket]);
+
+    toast.success("Logged out successfully");
+  }, []);
 
   // Update profile
   const updateProfile = useCallback(async (body) => {
@@ -76,65 +83,81 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Connect socket with optimized configuration
-  const connectSocket = useCallback(
-    (userData) => {
-      if (!userData || socket?.connected) return;
+  // Connect socket - separate useEffect
+  useEffect(() => {
+    if (!authUser || isConnectingRef.current || socketRef.current?.connected) {
+      return;
+    }
 
-      const newSocket = io(backendUrl, {
-        query: { userId: userData._id },
-        transports: ["websocket", "polling"], // Prefer websocket
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5,
-        timeout: 10000,
-      });
+    isConnectingRef.current = true;
+    console.log("Connecting socket for user:", authUser._id);
 
-      // Connection status handlers
-      newSocket.on("connect", () => {
-        console.log("Socket connected");
-        setConnectionStatus("connected");
-      });
+    const newSocket = io(backendUrl, {
+      query: { userId: authUser._id },
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5,
+      timeout: 10000,
+    });
 
-      newSocket.on("disconnect", (reason) => {
-        console.log("Socket disconnected:", reason);
-        setConnectionStatus("disconnected");
-        if (reason === "io server disconnect") {
-          // Server disconnected, try to reconnect
-          newSocket.connect();
-        }
-      });
+    // Connection status handlers
+    newSocket.on("connect", () => {
+      console.log("✅ Socket connected");
+      setConnectionStatus("connected");
+      isConnectingRef.current = false;
+    });
 
-      newSocket.on("connect_error", (error) => {
-        console.error("Socket connection error:", error);
-        setConnectionStatus("error");
-      });
+    newSocket.on("disconnect", (reason) => {
+      console.log("❌ Socket disconnected:", reason);
+      setConnectionStatus("disconnected");
+      isConnectingRef.current = false;
+    });
 
-      newSocket.on("reconnect", (attemptNumber) => {
-        console.log("Socket reconnected after", attemptNumber, "attempts");
-        setConnectionStatus("connected");
-        toast.success("Reconnected to server", { duration: 2000 });
-      });
+    newSocket.on("connect_error", (error) => {
+      console.error("Socket connection error:", error);
+      setConnectionStatus("error");
+      isConnectingRef.current = false;
+    });
 
-      newSocket.on("reconnect_attempt", () => {
-        setConnectionStatus("reconnecting");
-      });
+    newSocket.on("reconnect", (attemptNumber) => {
+      console.log("✅ Socket reconnected after", attemptNumber, "attempts");
+      setConnectionStatus("connected");
+      toast.success("Reconnected", { duration: 2000 });
+    });
 
-      newSocket.on("reconnect_failed", () => {
-        setConnectionStatus("failed");
-        toast.error("Failed to reconnect to server");
-      });
+    newSocket.on("reconnect_attempt", () => {
+      console.log("🔄 Attempting to reconnect...");
+      setConnectionStatus("reconnecting");
+    });
 
-      // Online users handler
-      newSocket.on("getOnlineUsers", (userIds) => {
-        setOnlineUsers(userIds);
-      });
+    newSocket.on("reconnect_failed", () => {
+      console.error("❌ Reconnection failed");
+      setConnectionStatus("failed");
+      toast.error("Failed to reconnect to server");
+      isConnectingRef.current = false;
+    });
 
-      setSocket(newSocket);
-    },
-    [socket, backendUrl]
-  );
+    // Online users handler
+    newSocket.on("getOnlineUsers", (userIds) => {
+      console.log("📡 Online users updated:", userIds);
+      setOnlineUsers(userIds);
+    });
+
+    socketRef.current = newSocket;
+    setSocket(newSocket);
+
+    // Cleanup on unmount
+    return () => {
+      console.log("Cleaning up socket connection");
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      isConnectingRef.current = false;
+    };
+  }, [authUser]);
 
   // Initialize auth check
   useEffect(() => {

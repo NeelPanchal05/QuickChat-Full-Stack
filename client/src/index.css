@@ -49,6 +49,22 @@
     animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
+  /* Slide-down animation for connection status */
+  @keyframes slide-down {
+    from {
+      opacity: 0;
+      transform: translateY(-100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-down {
+    animation: slide-down 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   /* Smooth bounce for typing indicator */
   @keyframes smooth-bounce {
     0%, 80%, 100% {
