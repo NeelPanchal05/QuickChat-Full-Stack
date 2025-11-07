@@ -11,41 +11,64 @@ import { Server } from "socket.io";
 const app = express();
 const server = http.createServer(app);
 
-// Initialize socket.io server
-// OPTIMIZATION: Configure pingInterval and pingTimeout for a stable connection heartbeat
+// Initialize socket.io server with optimized configuration
 export const io = new Server(server, {
-  cors: { origin: "*" },
-  pingInterval: 10000,
-  pingTimeout: 5000,
+  cors: {
+    origin: "*",
+    credentials: true,
+  },
+  // Optimized ping configuration for better connection stability
+  pingInterval: 25000, // Send ping every 25 seconds
+  pingTimeout: 20000, // Wait 20 seconds for pong
+  // Use websocket for better performance
+  transports: ["websocket", "polling"],
+  // Compression for better performance
+  perMessageDeflate: {
+    threshold: 1024, // Compress messages > 1KB
+  },
+  // Allow reconnection
+  allowEIO3: true,
+  // Connection timeout
+  connectTimeout: 45000,
 });
 
 // Store online users
 export const userSocketMap = {}; // { userId: socketId }
 
+// Track typing states
+const typingUsers = new Map(); // Map<userId, Set<typingToUserId>>
+
 // Socket.io connection handler
 io.on("connection", (socket) => {
   const userId = socket.handshake.query.userId;
-  console.log("User Connected", userId);
+  console.log("User Connected:", userId, "Socket ID:", socket.id);
 
-  if (userId) userSocketMap[userId] = socket.id;
+  if (userId && userId !== "undefined") {
+    userSocketMap[userId] = socket.id;
 
-  // Emit online users to all connected clients
-  io.emit("getOnlineUsers", Object.keys(userSocketMap));
+    // Emit updated online users immediately
+    io.emit("getOnlineUsers", Object.keys(userSocketMap));
+  }
 
-  // WebRTC Signaling Events
-
-  // Handle call initiation
-  socket.on("call:initiate", ({ to, offer, from }) => {
+  // Handle typing events with debounce
+  socket.on("user:typing", ({ to, isTyping }) => {
     const receiverSocketId = userSocketMap[to];
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("call:incoming", {
-        from,
-        offer,
+      io.to(receiverSocketId).emit("user:typing", {
+        userId,
+        isTyping,
       });
     }
   });
 
-  // Handle call answer
+  // WebRTC Signaling Events
+  socket.on("call:initiate", ({ to, offer, from }) => {
+    const receiverSocketId = userSocketMap[to];
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("call:incoming", { from, offer });
+    }
+  });
+
   socket.on("call:answer", ({ to, answer }) => {
     const callerSocketId = userSocketMap[to];
     if (callerSocketId) {
@@ -53,7 +76,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Handle ICE candidates
   socket.on("call:ice-candidate", ({ to, candidate }) => {
     const receiverSocketId = userSocketMap[to];
     if (receiverSocketId) {
@@ -61,7 +83,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Handle call rejection
   socket.on("call:reject", ({ to }) => {
     const callerSocketId = userSocketMap[to];
     if (callerSocketId) {
@@ -69,7 +90,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Handle call end
   socket.on("call:end", ({ to }) => {
     const receiverSocketId = userSocketMap[to];
     if (receiverSocketId) {
@@ -77,20 +97,39 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    console.log("User Disconnected", userId);
-    // OPTIMIZATION: Only delete the user from map if the socket ID matches
-    // to prevent briefly showing offline during a fast reconnection cycle.
-    if (userSocketMap[userId] === socket.id) {
+  // Handle disconnection with proper cleanup
+  socket.on("disconnect", (reason) => {
+    console.log("User Disconnected:", userId, "Reason:", reason);
+
+    if (userId && userSocketMap[userId] === socket.id) {
       delete userSocketMap[userId];
+
+      // Clean up typing state
+      typingUsers.delete(userId);
+
+      // Emit updated online users
+      io.emit("getOnlineUsers", Object.keys(userSocketMap));
     }
-    io.emit("getOnlineUsers", Object.keys(userSocketMap));
+  });
+
+  // Handle errors
+  socket.on("error", (error) => {
+    console.error("Socket error for user", userId, ":", error);
   });
 });
 
-// Middleware setup
+// Middleware setup with optimized limits
 app.use(express.json({ limit: "4mb" }));
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+  })
+);
+
+// Add compression middleware for better performance
+import compression from "compression";
+app.use(compression());
 
 // Routes setup
 app.use("/api/status", (req, res) => res.send("Server is live"));
@@ -100,9 +139,13 @@ app.use("/api/messages", messageRouter);
 // Connect to MongoDB
 await connectDB();
 
+// Start server
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 5000;
-  server.listen(PORT, () => console.log("Server is running on PORT: " + PORT));
+  server.listen(PORT, () => {
+    console.log("Server is running on PORT:", PORT);
+    console.log("Socket.IO configured with optimized settings");
+  });
 }
 
 // Export server for Vercel

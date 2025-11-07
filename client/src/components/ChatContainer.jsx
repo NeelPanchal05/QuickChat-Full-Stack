@@ -1,4 +1,11 @@
-import React, { useContext, useEffect, useRef, useState, memo } from "react"; // ADDED memo
+import React, {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  memo,
+  useCallback,
+} from "react";
 import assets from "../assets/assets";
 import { formatMessageTime } from "../lib/utils";
 import { ChatContext } from "../../context/ChatContext";
@@ -7,7 +14,7 @@ import { useWebRTC } from "../hooks/useWebRTC";
 import VoiceCall from "./VoiceCall";
 import toast from "react-hot-toast";
 
-// New Memoized Message component for performance and animation
+// Memoized Message component
 const MessageBubble = memo(({ msg, authUser, selectedUser }) => {
   const isMyMessage = msg.senderId === authUser._id;
   const profilePic = isMyMessage
@@ -16,21 +23,19 @@ const MessageBubble = memo(({ msg, authUser, selectedUser }) => {
 
   return (
     <div
-      // Use the CSS animation class defined in index.css
       className={`flex items-end gap-2 justify-end animate-message-enter ${
         !isMyMessage && "flex-row-reverse"
-      }`}
+      } ${msg.isPending ? "opacity-60" : ""}`}
     >
       {msg.image ? (
         <img
           src={msg.image}
           alt=""
-          // ADDED subtle hover effect for images
           className="max-w-[230px] border border-gray-700 rounded-lg overflow-hidden mb-8 shadow-lg transform transition-transform duration-300 hover:scale-[1.02] cursor-pointer"
         />
       ) : (
         <p
-          className={`p-3 max-w-xs md:max-w-md font-light rounded-2xl mb-8 break-words text-white shadow-md transition-colors ${
+          className={`p-3 max-w-xs md:max-w-md font-light rounded-2xl mb-8 break-words text-white shadow-md transition-all duration-200 ${
             isMyMessage
               ? "rounded-br-none bg-violet-600/90 ml-auto"
               : "rounded-bl-none bg-gray-700/80 mr-auto"
@@ -43,9 +48,12 @@ const MessageBubble = memo(({ msg, authUser, selectedUser }) => {
         <img
           src={profilePic}
           alt=""
-          className="w-7 h-7 rounded-full object-cover" // Ensure image is a perfect circle
+          className="w-7 h-7 rounded-full object-cover"
         />
         <p className="text-gray-500 mt-1">{formatMessageTime(msg.createdAt)}</p>
+        {msg.isPending && (
+          <span className="text-gray-500 text-[10px]">Sending...</span>
+        )}
       </div>
     </div>
   );
@@ -53,17 +61,47 @@ const MessageBubble = memo(({ msg, authUser, selectedUser }) => {
 
 MessageBubble.displayName = "MessageBubble";
 
-const ChatContainer = () => {
-  const { messages, selectedUser, setSelectedUser, sendMessage, getMessages } =
-    useContext(ChatContext);
+// Typing indicator component
+const TypingIndicator = memo(() => (
+  <div className="flex items-end gap-2 mb-4 animate-message-enter">
+    <div className="p-3 rounded-2xl rounded-bl-none bg-gray-700/80">
+      <div className="flex gap-1">
+        <div
+          className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"
+          style={{ animationDelay: "0ms" }}
+        ></div>
+        <div
+          className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"
+          style={{ animationDelay: "150ms" }}
+        ></div>
+        <div
+          className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"
+          style={{ animationDelay: "300ms" }}
+        ></div>
+      </div>
+    </div>
+  </div>
+));
 
-  const { authUser, onlineUsers } = useContext(AuthContext);
+TypingIndicator.displayName = "TypingIndicator";
+
+const ChatContainer = () => {
+  const {
+    messages,
+    selectedUser,
+    setSelectedUser,
+    sendMessage,
+    getMessages,
+    isTyping,
+    emitTyping,
+  } = useContext(ChatContext);
+
+  const { authUser, onlineUsers, connectionStatus } = useContext(AuthContext);
 
   const scrollEnd = useRef();
-
   const [input, setInput] = useState("");
-  // State to control scroll behavior - smooth for new messages, auto for initial load
   const [shouldAnimateScroll, setShouldAnimateScroll] = useState(false);
+  const inputRef = useRef(null);
 
   // WebRTC hook
   const {
@@ -80,69 +118,97 @@ const ChatContainer = () => {
   } = useWebRTC();
 
   // Handle sending a message
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (input.trim() === "") return null;
+  const handleSendMessage = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (input.trim() === "") return;
 
-    setShouldAnimateScroll(true); // Animate scroll after sending
-    await sendMessage({ text: input.trim() });
-    setInput("");
-  };
+      setShouldAnimateScroll(true);
+      await sendMessage({ text: input.trim() });
+      setInput("");
+      inputRef.current?.focus();
+    },
+    [input, sendMessage]
+  );
 
   // Handle sending an image
-  const handleSendImage = async (e) => {
-    const file = e.target.files[0];
-    if (!file || !file.type.startsWith("image/")) {
-      toast.error("select an image file");
-      return;
-    }
+  const handleSendImage = useCallback(
+    async (e) => {
+      const file = e.target.files[0];
+      if (!file || !file.type.startsWith("image/")) {
+        toast.error("Select an image file");
+        return;
+      }
 
-    setShouldAnimateScroll(true); // Animate scroll after sending
+      setShouldAnimateScroll(true);
 
-    const reader = new FileReader();
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        await sendMessage({ image: reader.result });
+        e.target.value = "";
+      };
+      reader.readAsDataURL(file);
+    },
+    [sendMessage]
+  );
 
-    reader.onloadend = async () => {
-      await sendMessage({ image: reader.result });
-      e.target.value = "";
-    };
-    reader.readAsDataURL(file);
-  };
+  // Handle typing indicator
+  const handleInputChange = useCallback(
+    (e) => {
+      setInput(e.target.value);
+      if (e.target.value.length > 0) {
+        emitTyping(true);
+      } else {
+        emitTyping(false);
+      }
+    },
+    [emitTyping]
+  );
 
   // Handle starting a call
-  const handleStartCall = () => {
+  const handleStartCall = useCallback(() => {
     if (!onlineUsers.includes(selectedUser._id)) {
       toast.error("User is offline");
       return;
     }
     startCall(selectedUser);
-  };
+  }, [onlineUsers, selectedUser, startCall]);
 
+  // Load messages when user is selected
   useEffect(() => {
     if (selectedUser) {
-      setShouldAnimateScroll(false); // Disable smooth scroll on initial load for a user
+      setShouldAnimateScroll(false);
       getMessages(selectedUser._id);
     }
-  }, [selectedUser]);
+  }, [selectedUser, getMessages]);
 
-  // OPTIMIZATION: Smarter scrolling logic
+  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollEnd.current && messages) {
       scrollEnd.current.scrollIntoView({
         behavior: shouldAnimateScroll ? "smooth" : "auto",
       });
-      // Reset after a smooth scroll so other re-renders don't re-scroll
       if (shouldAnimateScroll) {
         setShouldAnimateScroll(false);
       }
     }
-  }, [messages]); // Trigger on messages change
+  }, [messages, shouldAnimateScroll]);
+
+  // Connection status indicator
+  const connectionIndicator = connectionStatus !== "connected" && (
+    <div className="absolute top-0 left-0 right-0 bg-yellow-500/90 text-white text-center py-1 text-xs z-10">
+      {connectionStatus === "reconnecting"
+        ? "Reconnecting..."
+        : "Connection lost"}
+    </div>
+  );
 
   return selectedUser ? (
     <>
       <div className="h-full overflow-hidden relative backdrop-blur-lg flex flex-col">
-        {" "}
-        {/* Added flex-col and overflow-hidden */}
-        {/* ------- header ------- */}
+        {connectionIndicator}
+
+        {/* Header */}
         <div className="flex items-center gap-3 py-3 px-4 border-b border-stone-500 flex-shrink-0">
           <img
             src={selectedUser.profilePic || assets.avatar_icon}
@@ -152,7 +218,6 @@ const ChatContainer = () => {
           <p className="flex-1 text-lg text-white flex items-center gap-2">
             {selectedUser.fullName}
             {onlineUsers.includes(selectedUser._id) && (
-              // ADDED subtle pulse animation
               <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
             )}
           </p>
@@ -160,7 +225,6 @@ const ChatContainer = () => {
           {/* Voice Call Button */}
           <button
             onClick={handleStartCall}
-            // ADDED hover/disabled visual feedback
             className={`p-2 rounded-full transition-all ${
               !onlineUsers.includes(selectedUser._id)
                 ? "text-gray-500 cursor-not-allowed"
@@ -178,37 +242,35 @@ const ChatContainer = () => {
             onClick={() => setSelectedUser(null)}
             src={assets.arrow_icon}
             alt=""
-            // ADDED subtle transition
             className="md:hidden max-w-7 cursor-pointer transform rotate-180 transition-transform hover:scale-110"
           />
           <img
             src={assets.help_icon}
             alt=""
-            // ADDED subtle transition
             className="max-md:hidden max-w-5 cursor-pointer transition-transform hover:scale-110"
           />
         </div>
-        {/* ------- chat area ------- */}
-        {/* Added flex-1 and overflow-y-auto to manage scroll correctly */}
+
+        {/* Chat area */}
         <div className="flex flex-col flex-1 overflow-y-auto p-3 pb-6">
-          {messages.map((msg, index) => (
+          {messages.map((msg) => (
             <MessageBubble
-              key={msg._id || index} // Use message ID for stable keys
+              key={msg._id}
               msg={msg}
               authUser={authUser}
               selectedUser={selectedUser}
             />
           ))}
-          {/* Scroll end element */}
+          {isTyping && <TypingIndicator />}
           <div ref={scrollEnd}></div>
         </div>
-        {/* ------- bottom area ------- */}
+
+        {/* Bottom area */}
         <div className="flex items-center gap-3 p-3 flex-shrink-0">
-          {" "}
-          {/* Added flex-shrink-0 */}
           <div className="flex-1 flex items-center bg-gray-100/12 px-3 rounded-full">
             <input
-              onChange={(e) => setInput(e.target.value)}
+              ref={inputRef}
+              onChange={handleInputChange}
               value={input}
               onKeyDown={(e) =>
                 e.key === "Enter" ? handleSendMessage(e) : null
@@ -228,7 +290,6 @@ const ChatContainer = () => {
               <img
                 src={assets.gallery_icon}
                 alt=""
-                // ADDED subtle transition
                 className="w-5 mr-2 cursor-pointer transition-transform hover:scale-110"
               />
             </label>
@@ -237,7 +298,6 @@ const ChatContainer = () => {
             onClick={handleSendMessage}
             src={assets.send_button}
             alt=""
-            // ADDED click/hover animation
             className="w-8 h-8 cursor-pointer transition-transform hover:scale-110 active:scale-90"
           />
         </div>
@@ -258,9 +318,15 @@ const ChatContainer = () => {
     </>
   ) : (
     <div className="flex flex-col items-center justify-center gap-2 text-gray-500 bg-white/10 max-md:hidden">
-      <img src={assets.logo_icon} className="max-w-16 animate-pulse" alt="" />{" "}
-      {/* ADDED pulse animation */}
+      <img src={assets.logo_icon} className="max-w-16 animate-pulse" alt="" />
       <p className="text-lg font-medium text-white">Chat anytime, anywhere</p>
+      {connectionStatus !== "connected" && (
+        <p className="text-sm text-yellow-400">
+          {connectionStatus === "reconnecting"
+            ? "Reconnecting..."
+            : "Connection lost"}
+        </p>
+      )}
     </div>
   );
 };
