@@ -12,8 +12,11 @@ const app = express();
 const server = http.createServer(app);
 
 // Initialize socket.io server
+// OPTIMIZATION: Configure pingInterval and pingTimeout for a stable connection heartbeat
 export const io = new Server(server, {
   cors: { origin: "*" },
+  pingInterval: 10000,
+  pingTimeout: 5000,
 });
 
 // Store online users
@@ -76,7 +79,11 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("User Disconnected", userId);
-    delete userSocketMap[userId];
+    // OPTIMIZATION: Only delete the user from map if the socket ID matches
+    // to prevent briefly showing offline during a fast reconnection cycle.
+    if (userSocketMap[userId] === socket.id) {
+      delete userSocketMap[userId];
+    }
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
   });
 });
