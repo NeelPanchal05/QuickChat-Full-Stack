@@ -6,11 +6,12 @@ export const connectDB = async () => {
     mongoose.connection.on("connected", () =>
       console.log("Database Connected")
     );
-    // FIX: Remove manual database name appending. The name 'chat-app' should be in the MONGODB_URI environment variable or is implied.
+    // FIX: Ensure MONGODB_URI includes the database name in Vercel settings.
     await mongoose.connect(process.env.MONGODB_URI);
   } catch (error) {
-    // Log the error to Vercel console for debugging
-    console.error("MongoDB connection failed:", error.message);
-    // You might want to exit the process or handle the failure gracefully here
+    // Log the failure in Vercel's console
+    console.error("CRITICAL ERROR: MongoDB connection failed:", error.message);
+    // Throw an error to ensure the serverless function exits if the database is unavailable
+    throw new Error("DB Connection Failed: " + error.message);
   }
 };

@@ -47,7 +47,7 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
     const userData = await User.findOne({ email });
 
-    // FIX 1: Check if user exists BEFORE accessing userData.password
+    // FIX: Check if user exists BEFORE accessing userData.password
     if (!userData) {
       return res.json({
         success: false,
@@ -58,6 +58,7 @@ export const login = async (req, res) => {
     const isPasswordCorrect = await bcrypt.compare(password, userData.password);
 
     if (!isPasswordCorrect) {
+      // Use a generic message for security, but the logic is correct
       return res.json({ success: false, message: "Invalid credentials" });
     }
 
@@ -65,11 +66,14 @@ export const login = async (req, res) => {
 
     res.json({ success: true, userData, token, message: "Login successful" });
   } catch (error) {
-    // FIX 2: Better logging if the error is not about wrong credentials (e.g., database connection failure)
-    console.error("Login error:", error.message);
+    // Log to Vercel console
+    console.error(
+      "Login error during database operation or bcrypt:",
+      error.message
+    );
     res.json({
       success: false,
-      message: error.message || "An unexpected error occurred during login.",
+      message: error.message || "An unexpected server error occurred.",
     });
   }
 };
