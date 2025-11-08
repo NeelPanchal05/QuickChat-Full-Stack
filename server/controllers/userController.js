@@ -11,6 +11,7 @@ export const signup = async (req, res) => {
     if (!fullName || !email || !password || !bio) {
       return res.json({ success: false, message: "Missing Details" });
     }
+
     const user = await User.findOne({ email });
 
     if (user) {
@@ -36,7 +37,7 @@ export const signup = async (req, res) => {
       message: "Account created successfully",
     });
   } catch (error) {
-    console.log(error.message);
+    console.log("Signup error:", error.message);
     res.json({ success: false, message: error.message });
   }
 };
@@ -45,20 +46,28 @@ export const signup = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    // CRITICAL FIX: Check for missing fields first
+    if (!email || !password) {
+      return res.json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
     const userData = await User.findOne({ email });
 
-    // FIX: Check if user exists BEFORE accessing userData.password
+    // CRITICAL FIX: Check if user exists BEFORE trying to compare password
     if (!userData) {
       return res.json({
         success: false,
-        message: "Invalid credentials (User not found)",
+        message: "Invalid credentials",
       });
     }
 
     const isPasswordCorrect = await bcrypt.compare(password, userData.password);
 
     if (!isPasswordCorrect) {
-      // Use a generic message for security, but the logic is correct
       return res.json({ success: false, message: "Invalid credentials" });
     }
 
@@ -66,17 +75,14 @@ export const login = async (req, res) => {
 
     res.json({ success: true, userData, token, message: "Login successful" });
   } catch (error) {
-    // Log to Vercel console
-    console.error(
-      "Login error during database operation or bcrypt:",
-      error.message
-    );
+    console.error("Login error:", error.message);
     res.json({
       success: false,
-      message: error.message || "An unexpected server error occurred.",
+      message: "An unexpected server error occurred.",
     });
   }
 };
+
 // Controller to check if user is authenticated
 export const checkAuth = (req, res) => {
   res.json({ success: true, user: req.user });
@@ -107,7 +113,7 @@ export const updateProfile = async (req, res) => {
     }
     res.json({ success: true, user: updatedUser });
   } catch (error) {
-    console.log(error.message);
+    console.log("Update profile error:", error.message);
     res.json({ success: false, message: error.message });
   }
 };
