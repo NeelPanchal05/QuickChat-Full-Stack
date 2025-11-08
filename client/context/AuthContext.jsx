@@ -105,7 +105,7 @@ export const AuthProvider = ({ children }) => {
       pingTimeout: 10000,
     });
 
-    // Connection status handlers
+    // Connection status handler
     newSocket.on("connect", () => {
       console.log("✅ Socket connected");
       setConnectionStatus("connected");

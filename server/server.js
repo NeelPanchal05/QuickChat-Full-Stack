@@ -152,7 +152,7 @@ app.use("/api/status", (req, res) => res.send("Server is live"));
 app.use("/api/auth", userRouter);
 app.use("/api/messages", messageRouter);
 
-// Connect to MongoDB
+// Connect to MongoDB Database
 await connectDB();
 
 // Start server
