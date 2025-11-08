@@ -96,10 +96,13 @@ export const AuthProvider = ({ children }) => {
       query: { userId: authUser._id },
       transports: ["websocket", "polling"],
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnectionDelay: 500, // Reduced delay
+      reconnectionDelayMax: 3000, // Reduced max delay
       reconnectionAttempts: 5,
       timeout: 10000,
+      // VERCEL FIX: Set ping timeout to match server config (5s interval + tolerance)
+      pingInterval: 5000,
+      pingTimeout: 10000,
     });
 
     // Connection status handlers

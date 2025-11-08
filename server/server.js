@@ -17,9 +17,9 @@ export const io = new Server(server, {
     origin: "*",
     credentials: true,
   },
-  // Optimized ping configuration for better connection stability
-  pingInterval: 25000, // Send ping every 25 seconds
-  pingTimeout: 20000, // Wait 20 seconds for pong
+  // VERCEL FIX: Reduced ping interval/timeout to prevent serverless function idle timeout
+  pingInterval: 5000, // Send ping every 5 seconds (was 25000)
+  pingTimeout: 10000, // Wait 10 seconds for pong (was 20000)
   // Use websocket for better performance
   transports: ["websocket", "polling"],
   // Compression for better performance
